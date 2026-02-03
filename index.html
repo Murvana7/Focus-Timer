@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Pomodoro + Tasks</title>
+<style>
+  :root{--bg:#070b14;--panel:rgba(255,255,255,.06);--border:rgba(255,255,255,.12);--text:#eaf0ff;--muted:rgba(234,240,255,.72);--acc:#38bdf8;--r:18px}
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:radial-gradient(900px 500px at 20% -10%, rgba(56,189,248,.28), transparent 60%), var(--bg);color:var(--text)}
+  .wrap{max-width:980px;margin:32px auto;padding:0 16px}
+  header{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:16px}
+  h1{margin:0;font-size:28px} .sub{color:var(--muted);margin:6px 0 0}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);padding:16px}
+  .timer{display:grid;place-items:center;padding:12px}
+  .time{font-size:56px;letter-spacing:1px;font-weight:800}
+  .mode{margin-top:6px;color:var(--muted)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;margin-top:12px}
+  button,input{border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);padding:10px 12px;outline:none}
+  button{cursor:pointer} button.primary{background:linear-gradient(90deg, rgba(56,189,248,.9), rgba(96,165,250,.9));border:none}
+  .pill{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--border);color:var(--muted)}
+  .tasks{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .task{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px;border-radius:14px;border:1px solid var(--border);background:rgba(0,0,0,.18)}
+  .task small{color:var(--muted)}
+  .grow{flex:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Pomodoro + Tasks</h1>
+      <div class="sub">Focus timer • quick tasks • saved locally</div>
+    </div>
+    <div class="pill" id="stats"></div>
+  </header>
+
+  <div class="grid">
+    <section class="card timer">
+      <div class="time" id="time">25:00</div>
+      <div class="mode" id="mode">Focus</div>
+      <div class="row">
+        <button class="primary" id="start">Start</button>
+        <button id="pause">Pause</button>
+        <button id="reset">Reset</button>
+        <button id="toggle">Switch Focus/Break</button>
+      </div>
+      <div class="row">
+        <span class="pill">Focus: 25m</span>
+        <span class="pill">Break: 5m</span>
+        <span class="pill" id="sessions">Sessions: 0</span>
+      </div>
+      <p class="sub" style="text-align:center;margin:12px 0 0">
+        When a timer ends, it auto-switches mode and counts a completed focus session.
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">Tasks</h3>
+        <button id="clear">Clear done</button>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <input class="grow" id="taskInput" placeholder="Add a task (e.g., Finish UI)"/>
+        <button class="primary" id="addTask">Add</button>
+      </div>
+
+      <div class="tasks" id="tasks"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const KEY="pomo_tasks_v1";
+const state = JSON.parse(localStorage.getItem(KEY) || '{"tasks":[],"sessions":0}');
+let tasks = state.tasks || [];
+let sessions = state.sessions || 0;
+
+let mode="focus";
+const focusSec=25*60, breakSec=5*60;
+let remaining=focusSec;
+let running=false, t=null;
+
+const $=s=>document.querySelector(s);
+
+function save(){
+  localStorage.setItem(KEY, JSON.stringify({tasks, sessions}));
+}
+function fmt(sec){
+  const m=Math.floor(sec/60).toString().padStart(2,"0");
+  const s=(sec%60).toString().padStart(2,"0");
+  return `${m}:${s}`;
+}
+function render(){
+  $("#time").textContent=fmt(remaining);
+  $("#mode").textContent = mode==="focus" ? "Focus" : "Break";
+  $("#sessions").textContent = "Sessions: " + sessions;
+  $("#stats").textContent = `Tasks: ${tasks.length} • Done: ${tasks.filter(t=>t.done).length}`;
+  const box=$("#tasks"); box.innerHTML="";
+  tasks.forEach(x=>{
+    const el=document.createElement("div");
+    el.className="task";
+    el.innerHTML=`
+      <div class="grow">
+        <div style="font-weight:650; text-decoration:${x.done?'line-through':'none'}">${escapeHtml(x.text)}</div>
+        <small>${x.done ? "Done" : "In progress"}</small>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button data-act="toggle">${x.done?"Undo":"Done"}</button>
+        <button data-act="del">Delete</button>
+      </div>
+    `;
+    el.querySelector('[data-act="toggle"]').onclick=()=>{x.done=!x.done; save(); render();};
+    el.querySelector('[data-act="del"]').onclick=()=>{tasks=tasks.filter(t=>t.id!==x.id); save(); render();};
+    box.appendChild(el);
+  });
+}
+function tick(){
+  remaining--;
+  if(remaining<=0){
+    if(mode==="focus") sessions++;
+    mode = (mode==="focus") ? "break" : "focus";
+    remaining = (mode==="focus") ? focusSec : breakSec;
+    save();
+    beep();
+  }
+  render();
+}
+function beep(){
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(); const g=ctx.createGain();
+    o.type="sine"; o.frequency.value=880;
+    o.connect(g); g.connect(ctx.destination);
+    g.gain.value=0.06;
+    o.start(); setTimeout(()=>{o.stop(); ctx.close();},180);
+  }catch(e){}
+}
+function start(){
+  if(running) return;
+  running=true;
+  t=setInterval(tick,1000);
+}
+function pause(){
+  running=false;
+  clearInterval(t); t=null;
+}
+function reset(){
+  pause();
+  remaining = (mode==="focus") ? focusSec : breakSec;
+  render();
+}
+function toggleMode(){
+  pause();
+  mode = (mode==="focus") ? "break" : "focus";
+  remaining = (mode==="focus") ? focusSec : breakSec;
+  render();
+}
+function addTask(){
+  const text=$("#taskInput").value.trim();
+  if(!text) return;
+  tasks.unshift({id:crypto.randomUUID(), text, done:false});
+  $("#taskInput").value="";
+  save(); render();
+}
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+$("#start").onclick=start;
+$("#pause").onclick=pause;
+$("#reset").onclick=reset;
+$("#toggle").onclick=toggleMode;
+$("#addTask").onclick=addTask;
+$("#taskInput").addEventListener("keydown", e=>{if(e.key==="Enter") addTask();});
+$("#clear").onclick=()=>{tasks=tasks.filter(t=>!t.done); save(); render();};
+
+render();
+</script>
+</body>
+</html>
